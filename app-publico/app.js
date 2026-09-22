@@ -313,6 +313,41 @@ function txDlg(id,pre){
  if(!t)setTimeout(()=>$("#d-v").focus(),50);
 }
 
+/* ---------- MODAIS (confirmar / perguntar valor / avisar) ---------- */
+function dlgConfirm(msg){
+ return new Promise(res=>{
+  const d=$("#dlg");
+  d.innerHTML=`<div>${esc(msg)}</div><div class="row" style="margin-top:14px"><button class="b s" data-x="0">Cancelar</button><button class="b" data-x="1">Confirmar</button></div>`;
+  const done=v=>{d.removeEventListener("click",onClick);d.removeEventListener("cancel",onCancel);res(v)};
+  const onClick=ev=>{const b=ev.target.closest("[data-x]");if(!b)return;d.close();done(b.dataset.x==="1")};
+  const onCancel=()=>done(false);
+  d.addEventListener("click",onClick);d.addEventListener("cancel",onCancel);
+  d.showModal();
+ });
+}
+function dlgPrompt(msg){
+ return new Promise(res=>{
+  const d=$("#dlg");
+  d.innerHTML=`<div>${esc(msg)}</div><input id="dp-v" type="number" step="0.01" inputmode="decimal" style="margin-top:10px" placeholder="R$"><div class="row" style="margin-top:14px"><button class="b s" data-x="0">Cancelar</button><button class="b" data-x="1">OK</button></div>`;
+  const done=v=>{d.removeEventListener("click",onClick);d.removeEventListener("cancel",onCancel);res(v)};
+  const onClick=ev=>{const b=ev.target.closest("[data-x]");if(!b)return;const ok=b.dataset.x==="1";d.close();done(ok?$("#dp-v").value:null)};
+  const onCancel=()=>done(null);
+  d.addEventListener("click",onClick);d.addEventListener("cancel",onCancel);
+  d.showModal();setTimeout(()=>$("#dp-v").focus(),50);
+ });
+}
+function dlgAlert(msg){
+ return new Promise(res=>{
+  const d=$("#dlg");
+  d.innerHTML=`<div style="white-space:pre-line">${esc(msg)}</div><div class="row" style="margin-top:14px"><button class="b" data-x="1">OK</button></div>`;
+  const done=()=>{d.removeEventListener("click",onClick);d.removeEventListener("cancel",onCancel);res()};
+  const onClick=ev=>{if(!ev.target.closest("[data-x]"))return;d.close();done()};
+  const onCancel=()=>done();
+  d.addEventListener("click",onClick);d.addEventListener("cancel",onCancel);
+  d.showModal();
+ });
+}
+
 /* ---------- EVENTOS ---------- */
 const listOf=k=>k==="fx"?plan(M).fixed:k==="cd"?plan(M).cards:k==="on"?plan(M).once:S.market;
 document.addEventListener("change",e=>{
@@ -347,13 +382,13 @@ document.addEventListener("click",async e=>{
    $("#dlg").close();break}
   case"tx-del":{const t=S.tx.find(x=>x.id==id);if(t&&t.ref)S.fuel=S.fuel.filter(f=>f.id!==t.ref);if(t&&t.mref)S.marketHist=S.marketHist.filter(x=>x.id!==t.mref);S.tx=S.tx.filter(x=>x.id!=id);$("#dlg").close();break}
   case"newplan":S.plans[M]=buildPlan(M,el.dataset.copy==="1");break;
-  case"delplan":if(confirm("Apagar o plano deste mês? Os gastos lançados continuam."))delete S.plans[M];break;
+  case"delplan":if(await dlgConfirm("Apagar o plano deste mês? Os gastos lançados continuam."))delete S.plans[M];break;
   case"add":{
    const pre={fixed:"fx",cards:"cd",once:"on"}[k],n=g("#"+pre+"-n").trim();if(!n)return;
    const o={id:uid(),name:n,amount:num(g("#"+pre+"-v"))};if(k==="fixed"){o.active=true;o.paid=false}
    plan(M)[k].push(o);break}
   case"del":plan(M)[k]=plan(M)[k].filter(x=>x.id!=id);break;
-  case"dep":{const v=num(prompt("Quanto depositou na reserva? (R$)"));if(v>0)S.reserve.deps.push({id:uid(),date:today(),amount:v});break}
+  case"dep":{const raw=await dlgPrompt("Quanto depositou na reserva? (R$)");if(raw==null)return;const v=num(raw);if(v>0)S.reserve.deps.push({id:uid(),date:today(),amount:v});break}
   case"mk-add":{const n=g("#mk-n").trim();if(!n)return;S.market.push({id:uid(),name:n,sec:g("#mk-s"),qty:num(g("#mk-q"))||1,price:num(g("#mk-p")),done:false});break}
   case"mk-del":S.market=S.market.filter(x=>x.id!=id);break;
   case"mk-fin":{
@@ -371,7 +406,7 @@ document.addEventListener("click",async e=>{
    S.tx.push({id:uid(),cat:"mercado",desc:"Supermercado",date:d,amount:v,mref:tid});
    S.market=S.market.filter(i=>!i.done);$("#dlg").close();break}
   case"mk-rep":{const h=S.marketHist.find(x=>x.id==id);if(h)h.items.forEach(i=>S.market.push({id:uid(),name:i.name,sec:i.sec,qty:i.qty,price:i.price,done:false}));break}
-  case"mk-hdel":if(confirm("Apagar esta compra do histórico e dos gastos?")){S.marketHist=S.marketHist.filter(x=>x.id!=id);S.tx=S.tx.filter(x=>x.mref!=id)}break;
+  case"mk-hdel":if(await dlgConfirm("Apagar esta compra do histórico e dos gastos?")){S.marketHist=S.marketHist.filter(x=>x.id!=id);S.tx=S.tx.filter(x=>x.mref!=id)}break;
   case"fu-add":{
    const l=num(g("#fu-l")),t=num(g("#fu-t")),km=num(g("#fu-k"));if(l<=0||t<=0)return;
    const fid=uid(),d=g("#fu-d")||today();
@@ -394,23 +429,24 @@ document.addEventListener("click",async e=>{
    return}
   case"can-reg":txDlg(null,{amount:el.dataset.v,cat:el.dataset.c});return;
   case"extra":{
-   const v=num(prompt("Valor da renda extra recebida (R$):"));if(v<=0)return;
-   const c=calc(M);if(!c){alert("Crie o plano deste mês primeiro.");return}
+   const raw=await dlgPrompt("Valor da renda extra recebida (R$):");if(raw==null)return;
+   const v=num(raw);if(v<=0)return;
+   const c=calc(M);if(!c){await dlgAlert("Crie o plano deste mês primeiro.");return}
    const cover=Math.min(v,Math.max(-c.free,0)),rest=v-cover,sp=S.extraSplit,t=(sp.reserva+sp.divida+sp.lazer)||1;
    const r=rest*sp.reserva/t,dv=rest*sp.divida/t,lz=rest*sp.lazer/t,p=plan(M);
    p.extra+=cover;p.extraLazer=(p.extraLazer||0)+lz;p.extraDebt=(p.extraDebt||0)+dv;
    if(r>0)S.reserve.deps.push({id:uid(),date:today(),amount:r});
-   alert(`Divisão de ${brl(v)}:\n• Cobrir déficit do mês: ${brl(cover)}\n• Reserva de emergência: ${brl(r)}\n• Adiantar dívidas/parcelas: ${brl(dv)}\n• Lazer: ${brl(lz)}`);break}
+   await dlgAlert(`Divisão de ${brl(v)}:\n• Cobrir déficit do mês: ${brl(cover)}\n• Reserva de emergência: ${brl(r)}\n• Adiantar dívidas/parcelas: ${brl(dv)}\n• Lazer: ${brl(lz)}`);break}
   case"csv":$("#csv").click();return;
   case"ct-add":{const n=g("#ct-n").trim();if(!n)return;S.cats.push({id:"c"+uid(),name:n,icon:g("#ct-i")||"📦",fund:"free",weight:10});break}
-  case"ct-del":if(confirm("Apagar categoria? Gastos antigos dela ficam sem categoria."))S.cats.splice(+id,1);break;
+  case"ct-del":if(await dlgConfirm("Apagar categoria? Gastos antigos dela ficam sem categoria."))S.cats.splice(+id,1);break;
   case"exp":{const l=document.createElement("a");l.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:"application/json"}));l.download="financas-backup-"+today()+".json";l.click();return}
   case"imp":$("#file").click();return;
   case"bk-copy":{const d=$("#dlg");d.innerHTML=`<h2>Backup em texto</h2><div class="mut">Copie e guarde este texto (ex.: mande para você mesmo no WhatsApp). Para voltar os dados, use "Restaurar de texto".</div><textarea id="bk-t" readonly rows="8" style="width:100%;margin-top:8px"></textarea><div class="row"><button class="b s" data-act="dlg-x">Fechar</button><button class="b" data-act="bk-do">Copiar</button></div>`;d.showModal();$("#bk-t").value=JSON.stringify(S);return}
   case"bk-do":{const t=$("#bk-t");t.select();let c=false;try{if(navigator.clipboard){navigator.clipboard.writeText(t.value).catch(()=>{});c=true}}catch(e){}try{c=document.execCommand("copy")||c}catch(e){}el.textContent=c?"Copiado ✓":"Selecione o texto e copie";return}
-  case"bk-paste":{const d=$("#dlg");d.innerHTML=`<h2>Restaurar backup</h2><div class="mut">Cole aqui o texto do backup. Isso substitui os dados atuais.</div><textarea id="bk-t" rows="8" style="width:100%;margin-top:8px" placeholder="Cole o backup aqui"></textarea><div class="row"><button class="b s" data-act="dlg-x">Cancelar</button><button class="b" data-act="bk-restore">Restaurar</button></div>`;d.showModal();return}
-  case"bk-restore":{try{const d=JSON.parse(g("#bk-t"));if(!d.plans||!d.cats)throw 0;S=d;norm();$("#dlg").close();break}catch(x){alert("Texto de backup inválido");return}}
-  case"rst":if(confirm("Apagar TODOS os dados e voltar ao modelo inicial?"))S=seed();norm();break;
+  case"bk-paste":{const d=$("#dlg");d.innerHTML=`<h2>Restaurar backup</h2><div class="mut">Cole aqui o texto do backup. Isso substitui os dados atuais.</div><textarea id="bk-t" rows="8" style="width:100%;margin-top:8px" placeholder="Cole o backup aqui"></textarea><div id="bk-err" class="bad mut" style="margin-top:6px"></div><div class="row"><button class="b s" data-act="dlg-x">Cancelar</button><button class="b" data-act="bk-restore">Restaurar</button></div>`;d.showModal();return}
+  case"bk-restore":{try{const d=JSON.parse(g("#bk-t"));if(!d.plans||!d.cats)throw 0;S=d;norm();$("#dlg").close();break}catch(x){$("#bk-err").textContent="Texto de backup inválido";return}}
+  case"rst":if(await dlgConfirm("Apagar TODOS os dados e voltar ao modelo inicial?"))S=seed();norm();break;
   default:return;
  }
  save();render();
@@ -452,13 +488,13 @@ function importCSV(text){
   if(left>0){S.installs.push({id:uid(),key:g.key,maxN:g.max,name:g.name,amount:g.amount,left,of:g.of,from});ni++}
  });
  save();render();
- alert(`Importação concluída:\n• ${added} gastos adicionados\n• ${dup} já existiam\n• ${skip} ignorados (pagamentos, estornos, descontos)\n• ${ni} compras parceladas cadastradas em Menus › Parcelas`);
+ dlgAlert(`Importação concluída:\n• ${added} gastos adicionados\n• ${dup} já existiam\n• ${skip} ignorados (pagamentos, estornos, descontos)\n• ${ni} compras parceladas cadastradas em Menus › Parcelas`);
 }
 document.addEventListener("change",e=>{
  if(e.target.id==="csv"){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>importCSV(String(r.result));r.readAsText(f);e.target.value="";return}
  if(e.target.id!=="file")return;
  const f=e.target.files[0];if(!f)return;
- const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.plans||!d.cats)throw 0;S=d;norm();save();render()}catch(x){alert("Arquivo inválido")}};r.readAsText(f);
+ const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.plans||!d.cats)throw 0;S=d;norm();save();render()}catch(x){dlgAlert("Arquivo inválido")}};r.readAsText(f);
 });
 sync();render();
 document.addEventListener("visibilitychange",()=>{if(!document.hidden){sync();render()}});
